@@ -3,6 +3,7 @@ use std::f32::consts::PI;
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     math::vec3,
+    pbr::CascadeShadowConfigBuilder,
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -44,7 +45,7 @@ fn main() {
         .add_plugin(InputPlugin)
         .add_plugin(MaterialPlugin::<WaterMaterial>::default())
         // A deepwater blue
-        .insert_resource(ClearColor(Color::rgb(0.6, 0.8, 1.0)))
+        .insert_resource(ClearColor(Color::rgb(0.6, 0.8, 9.0)))
         .add_state::<GameState>()
         .add_loading_state(
             LoadingState::new(GameState::AssetLoading).continue_to_state(GameState::Playing),
@@ -269,7 +270,14 @@ fn setup_level_gen(
     commands.spawn(MaterialMeshBundle {
         mesh: meshes.add(terrain_mesh.clone()),
         transform: Transform::from_xyz(0.0, y_offset, 0.0 as f32),
-        material: materials.add(Color::SILVER.into()),
+        material: materials.add(StandardMaterial {
+            // solid White
+            // base_color: Color::hex("ffffff").unwrap(),
+            // dark blue
+            base_color: Color::hex("0a0a2c").unwrap(),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
         ..default()
     });
 }
@@ -279,16 +287,58 @@ fn setup_graphics(
     mut meshes: ResMut<Assets<Mesh>>,
     mut water_materials: ResMut<Assets<WaterMaterial>>,
 ) {
-    commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(4.0, 10.0, 4.0),
-        point_light: PointLight {
-            intensity: 3000.0,
+    // directional 'sun' light
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 10000.0,
             shadows_enabled: true,
-            range: 30.0,
+            ..default()
+        },
+        transform: Transform::from_xyz(0.0, 30.0, 0.01).looking_at(Vec3::ZERO, Vec3::Y),
+        // The default cascade config is designed to handle large scenes.
+        // As this example has a much smaller world, we can tighten the shadow
+        // bounds for better visual quality.
+        cascade_shadow_config: CascadeShadowConfigBuilder {
+            first_cascade_far_bound: 4.0,
+            maximum_distance: 10.0,
+            ..default()
+        }
+        .into(),
+        ..default()
+    });
+
+    commands.spawn(PointLightBundle {
+        transform: Transform::from_xyz(0.0, 30.0, -50.0).looking_at(Vec3::ZERO, Vec3::Y),
+        point_light: PointLight {
+            // Deep water blue
+            color: Color::hex("0a0a2c").unwrap(),
+            intensity: 100000.0,
+            shadows_enabled: true,
+            range: 100.0,
             ..default()
         },
         ..default()
     });
+
+    // commands.insert_resource(AmbientLight {
+    //     color: Color::ORANGE_RED,
+    //     brightness: 1.0,
+    // });
+
+    // commands
+    //     .spawn(SpotLightBundle {
+    //         transform: Transform::from_xyz(0.0, 10.0, 0.0)
+    //             .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
+    //         spot_light: SpotLight {
+    //             intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
+    //             color: Color::RED,
+    //             shadows_enabled: true,
+    //             inner_angle: 0.6,
+    //             outer_angle: 0.8,
+    //             ..default()
+    //         },
+    //         ..default()
+    //     });
 
     // Bevy is a right handed, Y-up system.
     commands.spawn((
@@ -302,12 +352,15 @@ fn setup_graphics(
             transform: Transform::from_xyz(0.0, 0.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        FogSettings {
-            // A greenish blue fog
-            color: Color::rgba(0.0, 0.5, 0.8, 1.0),
-            falloff: FogFalloff::Exponential { density: 0.003 },
-            ..default()
-        },
+        // FogSettings {
+        //     // A greenish blue fog
+        //     color: Color::rgba(0.0, 0.5, 0.8, 1.0),
+        //     falloff: FogFalloff::Atmospheric {
+        //         extinction: Vec3::splat(0.015),
+        //         inscattering: Vec3::splat(0.007),
+        //     },
+        //     ..default()
+        // },
         BloomSettings::default(),
     ));
 
@@ -330,7 +383,7 @@ fn setup_graphics(
 }
 
 fn setup_player(mut commands: Commands, fish_collection: Res<FishCollection>) {
-    let fish_type = FishType::Whale;
+    let fish_type = FishType::Turtle;
     // Scale up by two cause he's smol
     let transform = Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::splat(2.0));
 
