@@ -7,9 +7,11 @@ use bevy::{
     prelude::*,
     reflect::TypeUuid,
     render::{
+        camera::ScalingMode,
         mesh::Indices,
         render_resource::{AsBindGroup, PrimitiveTopology},
     },
+    window::PrimaryWindow,
 };
 use bevy_asset_loader::prelude::{LoadingState, LoadingStateAppExt};
 use fishy_assets::{
@@ -28,13 +30,16 @@ mod compute_normals;
 mod fishy_assets;
 mod input;
 
+const WINDOW_WIDTH: f32 = 800.0;
+const WINDOW_HEIGHT: f32 = 600.0;
+
 fn main() {
     App::new()
         // Window resource
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Fishy".to_string(), // ToDo
-                resolution: (800., 600.).into(),
+                resolution: (WINDOW_WIDTH, WINDOW_HEIGHT).into(),
                 canvas: Some("#bevy".to_owned()),
                 position: WindowPosition::At((0, 0).into()),
                 ..default()
@@ -46,6 +51,7 @@ fn main() {
         .add_plugin(MaterialPlugin::<WaterMaterial>::default())
         // A deepwater blue
         .insert_resource(ClearColor(Color::rgb(0.6, 0.8, 9.0)))
+        .insert_resource(Bounds::default())
         .add_state::<GameState>()
         .add_loading_state(
             LoadingState::new(GameState::AssetLoading).continue_to_state(GameState::Playing),
@@ -60,11 +66,36 @@ fn main() {
             color: Color::WHITE,
             brightness: 1.0 / 5.0f32,
         })
-        .add_system(setup_graphics.in_schedule(OnEnter(GameState::Playing)))
-        .add_system(setup_level_gen.in_schedule(OnEnter(GameState::Playing)))
-        .add_system(setup_player.in_schedule(OnEnter(GameState::Playing)))
-        .add_system(setup_scene_once_loaded.in_set(OnUpdate(GameState::Playing)))
+        .configure_sets(
+            (SimulationSet::Input, SimulationSet::Logic)
+                .chain()
+                .in_base_set(CoreSet::Update),
+        )
+        .add_systems(
+            (setup_graphics, setup_level_gen, setup_player)
+                .in_set(SimulationSet::Logic)
+                .in_schedule(OnEnter(GameState::Playing)),
+        )
+        .add_systems(
+            (update_player_animations, constrain_to_bounds)
+                .distributive_run_if(in_state(GameState::Playing))
+                .in_set(SimulationSet::Logic),
+        )
         .run();
+}
+
+#[derive(Resource, Default)]
+pub struct Bounds {
+    pub min: Vec2,
+
+    pub max: Vec2,
+}
+
+// System sets can be used to group systems and configured to control relative ordering
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SimulationSet {
+    Input,
+    Logic,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
@@ -166,12 +197,11 @@ fn setup_level_gen(
     terrain_mesh.duplicate_vertices();
     compute_normals::compute_normals(&mut terrain_mesh);
 
-    let y_offset = -16.0;
-
     const CORAL_TYPES: usize = 100;
     const ROCK_TYPES: usize = 80;
     const SEAWEED_TYPES: usize = 100;
     const SHELL_TYPES: usize = 60;
+    const Y_OFFSET: f32 = -16.0;
 
     let mut rng = thread_rng();
     let coral_types = CoralType::iter().collect::<Vec<_>>();
@@ -179,7 +209,29 @@ fn setup_level_gen(
     let seaweed_types = SeaweedType::iter().collect::<Vec<_>>();
     let shell_types = ShellType::iter().collect::<Vec<_>>();
 
+    let mut underwater_scene = commands.spawn(SpatialBundle {
+        transform: Transform::from_xyz(0.0, Y_OFFSET, RADIUS / 4.0),
+        ..default()
+    });
+
+    underwater_scene.with_children(|parent| {
+        parent.spawn(MaterialMeshBundle {
+            mesh: meshes.add(terrain_mesh.clone()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            material: materials.add(StandardMaterial {
+                // solid White
+                // base_color: Color::hex("ffffff").unwrap(),
+                // dark blue
+                base_color: Color::hex("0a0a2c").unwrap(),
+                perceptual_roughness: 0.8,
+                ..default()
+            }),
+            ..default()
+        });
+    });
+
     for _ in 0..CORAL_TYPES {
+        // let coral_type = &CoralType::Coral6;
         let coral_type = coral_types.choose(&mut rng).unwrap();
         let coral_scene = coral_collection.model_for(coral_type);
         let scale = rng.gen_range(0.5..=4.0);
@@ -193,11 +245,12 @@ fn setup_level_gen(
             .sum::<f32>()
             / 4.0;
 
-        commands.spawn(SceneBundle {
-            scene: coral_scene,
-            transform: Transform::from_xyz(x as f32, y + y_offset - 2.0, z as f32)
-                .with_scale(Vec3::splat(scale)),
-            ..default()
+        underwater_scene.with_children(|parent| {
+            parent.spawn(SceneBundle {
+                scene: coral_scene,
+                transform: Transform::from_xyz(x, y - 2.0, z).with_scale(Vec3::splat(scale)),
+                ..default()
+            });
         });
     }
 
@@ -215,11 +268,12 @@ fn setup_level_gen(
             .sum::<f32>()
             / 4.0;
 
-        commands.spawn(SceneBundle {
-            scene: rock_scene,
-            transform: Transform::from_xyz(x as f32, y + y_offset - 2.0, z as f32)
-                .with_scale(Vec3::splat(scale)),
-            ..default()
+        underwater_scene.with_children(|parent| {
+            parent.spawn(SceneBundle {
+                scene: rock_scene,
+                transform: Transform::from_xyz(x, y - 4.0, z).with_scale(Vec3::splat(scale)),
+                ..default()
+            });
         });
     }
 
@@ -237,11 +291,12 @@ fn setup_level_gen(
             .sum::<f32>()
             / 4.0;
 
-        commands.spawn(SceneBundle {
-            scene: seaweed_scene,
-            transform: Transform::from_xyz(x as f32, y + y_offset - 2.0, z as f32)
-                .with_scale(Vec3::splat(scale)),
-            ..default()
+        underwater_scene.with_children(|parent| {
+            parent.spawn(SceneBundle {
+                scene: seaweed_scene,
+                transform: Transform::from_xyz(x, y - 2.0, z).with_scale(Vec3::splat(scale)),
+                ..default()
+            });
         });
     }
 
@@ -259,27 +314,14 @@ fn setup_level_gen(
             .sum::<f32>()
             / 4.0;
 
-        commands.spawn(SceneBundle {
-            scene: shell_scene,
-            transform: Transform::from_xyz(x as f32, y + y_offset, z as f32)
-                .with_scale(Vec3::splat(scale)),
-            ..default()
+        underwater_scene.with_children(|parent| {
+            parent.spawn(SceneBundle {
+                scene: shell_scene,
+                transform: Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
+                ..default()
+            });
         });
     }
-
-    commands.spawn(MaterialMeshBundle {
-        mesh: meshes.add(terrain_mesh.clone()),
-        transform: Transform::from_xyz(0.0, y_offset, 0.0 as f32),
-        material: materials.add(StandardMaterial {
-            // solid White
-            // base_color: Color::hex("ffffff").unwrap(),
-            // dark blue
-            base_color: Color::hex("0a0a2c").unwrap(),
-            perceptual_roughness: 0.8,
-            ..default()
-        }),
-        ..default()
-    });
 }
 
 fn setup_graphics(
@@ -340,46 +382,32 @@ fn setup_graphics(
     //         ..default()
     //     });
 
+    let mut camera_transform = Transform::from_xyz(0.0, 0.0, 30.0);
+    camera_transform.rotate_x(-PI / 40.0);
+
     // Bevy is a right handed, Y-up system.
     commands.spawn((
         Camera3dBundle {
             tonemapping: Tonemapping::TonyMcMapface,
-            // projection: Projection::Orthographic(OrthographicProjection {
-            //     scale: 12.0,
-            //     scaling_mode: ScalingMode::FixedVertical(4.0),
-            //     ..default()
-            // }),
-            transform: Transform::from_xyz(0.0, 0.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+            projection: Projection::Orthographic(OrthographicProjection {
+                scale: 8.0,
+                scaling_mode: ScalingMode::FixedVertical(4.0),
+                ..default()
+            }),
+            transform: camera_transform,
             ..default()
         },
-        // FogSettings {
-        //     // A greenish blue fog
-        //     color: Color::rgba(0.0, 0.5, 0.8, 1.0),
-        //     falloff: FogFalloff::Atmospheric {
-        //         extinction: Vec3::splat(0.015),
-        //         inscattering: Vec3::splat(0.007),
-        //     },
-        //     ..default()
-        // },
+        FogSettings {
+            // A greenish blue fog
+            color: Color::rgba(0.0, 0.5, 0.8, 1.0),
+            falloff: FogFalloff::Atmospheric {
+                extinction: Vec3::splat(0.005),
+                inscattering: Vec3::splat(0.003),
+            },
+            ..default()
+        },
         BloomSettings::default(),
     ));
-
-    // Spawn a simple plane for a water shader
-    commands.spawn(MaterialMeshBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane {
-            size: 30.0,
-            ..Default::default()
-        })),
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        material: water_materials.add(WaterMaterial {
-            time: 0.0,
-            surface_y: 0.5,
-            wave_height: 0.1,
-            wave_length: 0.5,
-            wave_speed: 0.2,
-        }),
-        ..default()
-    });
 }
 
 fn setup_player(mut commands: Commands, fish_collection: Res<FishCollection>) {
@@ -406,8 +434,7 @@ fn setup_player(mut commands: Commands, fish_collection: Res<FishCollection>) {
     ));
 }
 
-// Once the scene is loaded, start the animation
-fn setup_scene_once_loaded(
+fn update_player_animations(
     animation_collection: Res<FishAnimationCollection>,
     mut player_query: Query<&mut AnimationPlayer>,
     fish_query: Query<&Fish>,
@@ -434,6 +461,59 @@ fn setup_scene_once_loaded(
 
                 player.play(moving_animation).repeat();
             }
+        }
+    }
+}
+
+fn constrain_to_bounds(
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera_projection: Query<(&Transform, &Projection), (With<Camera>, Without<Player>)>,
+    mut query: Query<&mut Transform, With<Player>>,
+    mut bounds: ResMut<Bounds>,
+) {
+    let (camera_transform, projection) = camera_projection.single();
+    let resolution = &window.single().resolution;
+    let aspect_ratio = resolution.width() / resolution.height();
+    let (horizontal_view, vertical_view) =
+        if let Projection::Orthographic(orthographic) = projection {
+            let scale = orthographic.scale;
+            let (fixed_dim, other_dim) =
+                if let ScalingMode::FixedVertical(vertical) = orthographic.scaling_mode {
+                    ((vertical * aspect_ratio), vertical)
+                } else if let ScalingMode::FixedHorizontal(horizontal) = orthographic.scaling_mode {
+                    (horizontal, (horizontal / aspect_ratio))
+                } else {
+                    unimplemented!()
+                };
+            (fixed_dim * scale, other_dim * scale)
+        } else {
+            unimplemented!()
+        };
+
+    let min = Vec2::new(
+        camera_transform.translation.x - horizontal_view / 2.0,
+        camera_transform.translation.y - vertical_view / 2.0,
+    );
+    let max = Vec2::new(
+        camera_transform.translation.x + horizontal_view / 2.0,
+        camera_transform.translation.y + vertical_view / 2.0,
+    );
+
+    bounds.min = min;
+    bounds.max = max;
+
+    for mut player_transform in query.iter_mut() {
+        // Check if the player is outside the game bounds
+        if player_transform.translation.x < bounds.min.x {
+            player_transform.translation.x = bounds.min.x;
+        } else if player_transform.translation.x > bounds.max.x {
+            player_transform.translation.x = bounds.max.x;
+        }
+
+        if player_transform.translation.y < bounds.min.y {
+            player_transform.translation.y = bounds.min.y;
+        } else if player_transform.translation.y > bounds.max.y {
+            player_transform.translation.y = bounds.max.y;
         }
     }
 }

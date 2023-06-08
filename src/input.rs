@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use leafwing_input_manager::orientation::Direction;
 use leafwing_input_manager::prelude::*;
 
-use crate::GameState;
+use crate::{GameState, SimulationSet};
 
 // This plugin maps inputs to an input-type agnostic action-state
 // We need to provide it with an enum which stores the possible actions a player could take
@@ -12,8 +12,11 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(InputManagerPlugin::<MovementAction>::default())
             .add_event::<PlayerStateEvent>()
-            .add_system(set_direction.in_set(OnUpdate(GameState::Playing)))
-            .add_system(move_towards.in_set(OnUpdate(GameState::Playing)));
+            .add_systems(
+                (set_direction, move_towards)
+                    .distributive_run_if(in_state(GameState::Playing))
+                    .in_set(SimulationSet::Input),
+            );
     }
 }
 
