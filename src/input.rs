@@ -22,12 +22,12 @@ impl Plugin for InputPlugin {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct PlayerStateEvent {
-    pub state: PlayerState,
+    pub state: MovementState,
     pub entity: Entity,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub enum PlayerState {
+pub enum MovementState {
     Idle,
     Moving { direction: Vec2 },
 }
@@ -35,7 +35,7 @@ pub enum PlayerState {
 #[derive(Component)]
 pub struct Player {
     speed: f32,
-    state: PlayerState,
+    state: MovementState,
     lerp_factor: f32,
     acceleration: f32,
     max_speed: f32,
@@ -45,7 +45,7 @@ impl Default for Player {
     fn default() -> Self {
         Self {
             speed: 0.0,
-            state: PlayerState::Idle,
+            state: MovementState::Idle,
             lerp_factor: 0.1,
             acceleration: 6.0,
             max_speed: 1.6,
@@ -133,11 +133,11 @@ fn set_direction(
         }
 
         let next_state = if intended_direction != Vec2::ZERO {
-            PlayerState::Moving {
+            MovementState::Moving {
                 direction: intended_direction,
             }
         } else {
-            PlayerState::Idle
+            MovementState::Idle
         };
 
         if player.state != next_state {
@@ -155,9 +155,9 @@ fn move_towards(mut query: Query<(&mut Transform, &mut Player)>, time: Res<Time>
     let delta_seconds = time.delta_seconds();
 
     for (mut transform, mut player) in query.iter_mut() {
-        if let PlayerState::Idle = player.state {
+        if let MovementState::Idle = player.state {
             player.speed = (player.speed - player.acceleration * 3.0 * delta_seconds).max(0.0);
-        } else if let PlayerState::Moving { direction } = player.state {
+        } else if let MovementState::Moving { direction } = player.state {
             player.speed =
                 (player.speed + player.acceleration * delta_seconds).min(player.max_speed);
 

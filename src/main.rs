@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, time::Duration};
 
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
@@ -9,7 +9,8 @@ use bevy::{
     render::{
         camera::ScalingMode,
         mesh::Indices,
-        render_resource::{AsBindGroup, PrimitiveTopology},
+        primitives::Plane,
+        render_resource::{AsBindGroup, PrimitiveTopology, Texture},
     },
     window::PrimaryWindow,
 };
@@ -18,7 +19,8 @@ use fishy_assets::{
     CoralCollection, FishAnimationCollection, FishCollection, FishType, RockCollection,
     SeaweedCollection, ShellsCollection,
 };
-use input::{InputPlugin, Player, PlayerBundle, PlayerState, PlayerStateEvent};
+use hazard::HazardPlugin;
+use input::{InputPlugin, MovementState, Player, PlayerBundle, PlayerStateEvent};
 use leafwing_input_manager::InputManagerBundle;
 use noisy_bevy::{fbm_simplex_3d, NoisyShaderPlugin};
 use rand::{seq::SliceRandom, thread_rng, Rng};
@@ -28,6 +30,7 @@ use crate::fishy_assets::{CoralType, RockType, SeaweedType, ShellType};
 
 mod compute_normals;
 mod fishy_assets;
+mod hazard;
 mod input;
 
 const WINDOW_WIDTH: f32 = 800.0;
@@ -48,6 +51,7 @@ fn main() {
         }))
         .add_plugin(NoisyShaderPlugin)
         .add_plugin(InputPlugin)
+        .add_plugin(HazardPlugin)
         .add_plugin(MaterialPlugin::<WaterMaterial>::default())
         // A deepwater blue
         .insert_resource(ClearColor(Color::rgb(0.6, 0.8, 9.0)))
@@ -77,7 +81,12 @@ fn main() {
                 .in_schedule(OnEnter(GameState::Playing)),
         )
         .add_systems(
-            (update_player_animations, constrain_to_bounds)
+            (
+                play_initial_animations,
+                update_bounds,
+                constrain_to_bounds,
+                update_player_animations,
+            )
                 .distributive_run_if(in_state(GameState::Playing))
                 .in_set(SimulationSet::Logic),
         )
@@ -107,7 +116,7 @@ enum GameState {
 }
 
 #[derive(Component, Debug)]
-struct Fish {
+pub struct Fish {
     pub fish_type: FishType,
 }
 
@@ -142,6 +151,8 @@ pub struct WaterMaterial {
     wave_speed: f32,
 }
 
+const RADIUS: f32 = 100.;
+
 fn setup_level_gen(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -153,7 +164,6 @@ fn setup_level_gen(
 ) {
     const FREQUENCY_SCALE: f32 = 0.1;
     const AMPLITUDE_SCALE: f32 = 2.0;
-    const RADIUS: f32 = 100.;
     const OCTAVES: usize = 3;
     const LACUNARITY: f32 = 1.5; // Increase this value to create more peaks
     const GAIN: f32 = 0.001; // Decrease this value to create more peaks
@@ -233,7 +243,7 @@ fn setup_level_gen(
     for _ in 0..CORAL_TYPES {
         // let coral_type = &CoralType::Coral6;
         let coral_type = coral_types.choose(&mut rng).unwrap();
-        let coral_scene = coral_collection.model_for(coral_type);
+        let coral_scene = coral_type.model_from(&coral_collection);
         let scale = rng.gen_range(0.5..=4.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
@@ -256,7 +266,7 @@ fn setup_level_gen(
 
     for _ in 0..ROCK_TYPES {
         let rock_type = rock_types.choose(&mut rng).unwrap();
-        let rock_scene = rock_collection.model_for(rock_type);
+        let rock_scene = rock_type.model_from(&rock_collection);
         let scale = rng.gen_range(0.5..=4.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
@@ -279,7 +289,7 @@ fn setup_level_gen(
 
     for _ in 0..SEAWEED_TYPES {
         let seaweed_type = seaweed_types.choose(&mut rng).unwrap();
-        let seaweed_scene = seaweed_collection.model_for(seaweed_type);
+        let seaweed_scene = seaweed_type.model_from(&seaweed_collection);
         let scale = rng.gen_range(0.5..=6.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
@@ -302,7 +312,7 @@ fn setup_level_gen(
 
     for _ in 0..SHELL_TYPES {
         let shell_type = shell_types.choose(&mut rng).unwrap();
-        let shell_scene = shells_collection.model_for(shell_type);
+        let shell_scene = shell_type.model_from(&shells_collection);
         let scale = rng.gen_range(0.5..=2.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
@@ -327,7 +337,8 @@ fn setup_level_gen(
 fn setup_graphics(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut water_materials: ResMut<Assets<WaterMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // directional 'sun' light
     commands.spawn(DirectionalLightBundle {
@@ -361,11 +372,6 @@ fn setup_graphics(
         },
         ..default()
     });
-
-    // commands.insert_resource(AmbientLight {
-    //     color: Color::ORANGE_RED,
-    //     brightness: 1.0,
-    // });
 
     // commands
     //     .spawn(SpotLightBundle {
@@ -408,18 +414,63 @@ fn setup_graphics(
         },
         BloomSettings::default(),
     ));
+
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(
+            shape::Quad {
+                size: Vec2::new(50.0, 30.0),
+                flip: false,
+            }
+            .into(),
+        ),
+        material: materials.add(StandardMaterial {
+            base_color_texture: Some(asset_server.load("textures/background.jpg")),
+            ..default()
+        }),
+        transform: Transform::from_xyz(0.0, -5.0, -RADIUS),
+        ..default()
+    });
+
+    // commands.spawn(SpriteBundle {
+    //     sprite: Sprite {
+    //         custom_size: Some(Vec2::new(1920.0, 1080.0)),
+    //         // Alpha channel of the color controls transparency.
+    //         // color: Color::rgba(0.0, 0.0, 1.0, 0.7),
+    //         ..default()
+    //     },
+    //     texture: asset_server.load("textures/background.jpg").clone(),
+    //     transform: Transform::from_xyz(0.0, 0.0, 0.0),
+    //     ..default()
+    // });
 }
 
-fn setup_player(mut commands: Commands, fish_collection: Res<FishCollection>) {
+#[derive(Component)]
+pub struct InitialAnimation {
+    pub animation: Handle<AnimationClip>,
+
+    pub repeat: bool,
+}
+
+fn setup_player(
+    mut commands: Commands,
+    fish_collection: Res<FishCollection>,
+    animation_collection: Res<FishAnimationCollection>,
+) {
     let fish_type = FishType::Turtle;
     // Scale up by two cause he's smol
     let transform = Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::splat(2.0));
+    let fish_animations = fish_type.animations_from(&animation_collection);
+    let idle_animation = fish_animations.idle;
 
     commands.spawn((
+        InitialAnimation {
+            animation: idle_animation,
+            repeat: true,
+        },
         FishBundle {
             fish: Fish { fish_type },
             scene: SceneBundle {
-                scene: fish_collection.model_for(&fish_type),
+                scene: fish_type.model_from(&fish_collection),
                 transform,
                 ..default()
             },
@@ -436,43 +487,50 @@ fn setup_player(mut commands: Commands, fish_collection: Res<FishCollection>) {
 
 fn update_player_animations(
     animation_collection: Res<FishAnimationCollection>,
-    mut player_query: Query<&mut AnimationPlayer>,
+    children_query: Query<&Children>,
     fish_query: Query<&Fish>,
+    mut animation_player_query: Query<&mut AnimationPlayer>,
     mut player_state_events: EventReader<PlayerStateEvent>,
 ) {
-    let Ok(mut player) = player_query.get_single_mut() else {
-        return;
-    };
-
     for PlayerStateEvent { state, entity } in player_state_events.iter() {
         let fish = fish_query.get(*entity).unwrap();
-        let fish_animations = animation_collection.animations_for(&fish.fish_type);
 
-        match state {
-            PlayerState::Idle => {
-                let idle_animation = fish_animations.idle;
+        for child_entity in children_query.iter_descendants(*entity) {
+            let Ok(mut animation_player) = animation_player_query.get_mut(child_entity) else {
+                continue;
+            };
+            let fish_animations = fish.fish_type.animations_from(&animation_collection);
 
-                player.play(idle_animation).repeat();
-            }
-            PlayerState::Moving { direction: _ } => {
-                let Some(moving_animation) = fish_animations.moving else {
-                    continue;
-                };
+            match state {
+                MovementState::Idle => {
+                    let idle_animation = fish_animations.idle;
 
-                player.play(moving_animation).repeat();
+                    animation_player
+                        .play_with_transition(idle_animation, Duration::from_millis(250))
+                        .repeat();
+                }
+                MovementState::Moving { direction: _ } => {
+                    let Some(moving_animation) = fish_animations.moving else {
+                        continue;
+                    };
+
+                    animation_player
+                        .play_with_transition(moving_animation, Duration::from_millis(250))
+                        .repeat();
+                }
             }
         }
     }
 }
 
-fn constrain_to_bounds(
+fn update_bounds(
     window: Query<&Window, With<PrimaryWindow>>,
-    camera_projection: Query<(&Transform, &Projection), (With<Camera>, Without<Player>)>,
-    mut query: Query<&mut Transform, With<Player>>,
+    camera_projection: Query<(&Transform, &Projection), With<Camera>>,
     mut bounds: ResMut<Bounds>,
 ) {
     let (camera_transform, projection) = camera_projection.single();
     let resolution = &window.single().resolution;
+    let camera_transform = camera_transform.translation;
     let aspect_ratio = resolution.width() / resolution.height();
     let (horizontal_view, vertical_view) =
         if let Projection::Orthographic(orthographic) = projection {
@@ -490,30 +548,50 @@ fn constrain_to_bounds(
             unimplemented!()
         };
 
-    let min = Vec2::new(
-        camera_transform.translation.x - horizontal_view / 2.0,
-        camera_transform.translation.y - vertical_view / 2.0,
+    bounds.min = Vec2::new(
+        camera_transform.x - horizontal_view / 2.0,
+        camera_transform.y - vertical_view / 2.0,
     );
-    let max = Vec2::new(
-        camera_transform.translation.x + horizontal_view / 2.0,
-        camera_transform.translation.y + vertical_view / 2.0,
+    bounds.max = Vec2::new(
+        camera_transform.x + horizontal_view / 2.0,
+        camera_transform.y + vertical_view / 2.0,
     );
+}
 
-    bounds.min = min;
-    bounds.max = max;
-
+fn constrain_to_bounds(mut query: Query<&mut Transform, With<Player>>, bounds: Res<Bounds>) {
     for mut player_transform in query.iter_mut() {
-        // Check if the player is outside the game bounds
-        if player_transform.translation.x < bounds.min.x {
-            player_transform.translation.x = bounds.min.x;
-        } else if player_transform.translation.x > bounds.max.x {
-            player_transform.translation.x = bounds.max.x;
-        }
+        player_transform.translation.x = player_transform
+            .translation
+            .x
+            .clamp(bounds.min.x, bounds.max.x);
+        player_transform.translation.y = player_transform
+            .translation
+            .y
+            .clamp(bounds.min.y, bounds.max.y);
+    }
+}
 
-        if player_transform.translation.y < bounds.min.y {
-            player_transform.translation.y = bounds.min.y;
-        } else if player_transform.translation.y > bounds.max.y {
-            player_transform.translation.y = bounds.max.y;
+pub fn play_initial_animations(
+    // I can't use added here for some dumb reason. Some fishes get away without an animation.
+    // That's also the reason we need the silly elapsed time check in the loop.
+    initial_animation_query: Query<(Entity, &InitialAnimation), Ref<InitialAnimation>>,
+    mut animation_player_query: Query<&mut AnimationPlayer>,
+    children_query: Query<&Children>,
+) {
+    for (entity, initial_animation) in initial_animation_query.iter() {
+        for child_entity in children_query.iter_descendants(entity) {
+            let Ok(mut animation_player) = animation_player_query.get_mut(child_entity) else {
+                continue;
+            };
+            if animation_player.elapsed() > 0.0 {
+                continue;
+            }
+
+            animation_player.play(initial_animation.animation.clone());
+
+            if initial_animation.repeat {
+                animation_player.repeat();
+            }
         }
     }
 }
