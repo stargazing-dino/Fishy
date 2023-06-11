@@ -82,7 +82,7 @@ pub struct HazardSpawnTimer {
 impl Default for HazardSpawnTimer {
     fn default() -> HazardSpawnTimer {
         HazardSpawnTimer {
-            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
+            timer: Timer::from_seconds(3.0, TimerMode::Repeating),
         }
     }
 }

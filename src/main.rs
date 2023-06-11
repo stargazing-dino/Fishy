@@ -17,7 +17,7 @@ use bevy::{
 use bevy_asset_loader::prelude::{LoadingState, LoadingStateAppExt};
 use fishy_assets::{
     CoralCollection, FishAnimationCollection, FishCollection, FishType, RockCollection,
-    SeaweedCollection, ShellsCollection,
+    SeaweedAnimationCollection, SeaweedCollection, ShellsCollection,
 };
 use hazard::HazardPlugin;
 use input::{InputPlugin, MovementState, Player, PlayerBundle, PlayerStateEvent};
@@ -63,6 +63,7 @@ fn main() {
         .add_collection_to_loading_state::<_, FishCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, FishAnimationCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, SeaweedCollection>(GameState::AssetLoading)
+        .add_collection_to_loading_state::<_, SeaweedAnimationCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, RockCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, CoralCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, ShellsCollection>(GameState::AssetLoading)
@@ -160,6 +161,7 @@ fn setup_level_gen(
     coral_collection: Res<CoralCollection>,
     rock_collection: Res<RockCollection>,
     seaweed_collection: Res<SeaweedCollection>,
+    seaweed_animation_collection: Res<SeaweedAnimationCollection>,
     shells_collection: Res<ShellsCollection>,
 ) {
     const FREQUENCY_SCALE: f32 = 0.1;
@@ -244,7 +246,7 @@ fn setup_level_gen(
         // let coral_type = &CoralType::Coral6;
         let coral_type = coral_types.choose(&mut rng).unwrap();
         let coral_scene = coral_type.model_from(&coral_collection);
-        let scale = rng.gen_range(0.5..=4.0);
+        let scale = rng.gen_range(0.5..=3.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
         // Just get N nearest vertices by x and z and take the average height
@@ -288,9 +290,11 @@ fn setup_level_gen(
     }
 
     for _ in 0..SEAWEED_TYPES {
+        // let seaweed_type = SeaweedType::Seaweed;
         let seaweed_type = seaweed_types.choose(&mut rng).unwrap();
         let seaweed_scene = seaweed_type.model_from(&seaweed_collection);
-        let scale = rng.gen_range(0.5..=6.0);
+        let animation = seaweed_type.animation_from(&seaweed_animation_collection);
+        let scale = rng.gen_range(0.5..=5.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
         // Just get N nearest vertices by x and z and take the average height
@@ -302,18 +306,24 @@ fn setup_level_gen(
             / 4.0;
 
         underwater_scene.with_children(|parent| {
-            parent.spawn(SceneBundle {
-                scene: seaweed_scene,
-                transform: Transform::from_xyz(x, y - 2.0, z).with_scale(Vec3::splat(scale)),
-                ..default()
-            });
+            parent.spawn((
+                SceneBundle {
+                    scene: seaweed_scene,
+                    transform: Transform::from_xyz(x, y - 2.0, z).with_scale(Vec3::splat(scale)),
+                    ..default()
+                },
+                InitialAnimation {
+                    animation,
+                    repeat: true,
+                },
+            ));
         });
     }
 
     for _ in 0..SHELL_TYPES {
         let shell_type = shell_types.choose(&mut rng).unwrap();
         let shell_scene = shell_type.model_from(&shells_collection);
-        let scale = rng.gen_range(0.5..=2.0);
+        let scale = rng.gen_range(0.5..=1.0);
         let x = rng.gen_range(-RADIUS..=RADIUS);
         let z = rng.gen_range(-RADIUS..=RADIUS);
         // Just get N nearest vertices by x and z and take the average height
@@ -373,20 +383,18 @@ fn setup_graphics(
         ..default()
     });
 
-    // commands
-    //     .spawn(SpotLightBundle {
-    //         transform: Transform::from_xyz(0.0, 10.0, 0.0)
-    //             .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
-    //         spot_light: SpotLight {
-    //             intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
-    //             color: Color::RED,
-    //             shadows_enabled: true,
-    //             inner_angle: 0.6,
-    //             outer_angle: 0.8,
-    //             ..default()
-    //         },
-    //         ..default()
-    //     });
+    commands.spawn(PointLightBundle {
+        transform: Transform::from_xyz(30.0, 200.0, -20.0).looking_at(Vec3::ZERO, Vec3::Y),
+        point_light: PointLight {
+            // Light color
+            color: Color::hex("ffddaa").unwrap(),
+            intensity: 100000.0,
+            shadows_enabled: true,
+            range: 100.0,
+            ..default()
+        },
+        ..default()
+    });
 
     let mut camera_transform = Transform::from_xyz(0.0, 0.0, 30.0);
     camera_transform.rotate_x(-PI / 40.0);
@@ -408,7 +416,7 @@ fn setup_graphics(
             color: Color::rgba(0.0, 0.5, 0.8, 1.0),
             falloff: FogFalloff::Atmospheric {
                 extinction: Vec3::splat(0.005),
-                inscattering: Vec3::splat(0.003),
+                inscattering: Vec3::splat(0.0005),
             },
             ..default()
         },

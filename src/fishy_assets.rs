@@ -130,7 +130,6 @@ impl RockType {
 
 #[derive(Debug, Copy, Clone, EnumIter)]
 pub enum SeaweedType {
-    // TODO: This is broken.
     // Seaweed,
     Seaweed1,
     Seaweed2,
@@ -138,12 +137,12 @@ pub enum SeaweedType {
 
 #[derive(AssetCollection, Resource)]
 pub struct SeaweedCollection {
-    // #[asset(path = "models/SeaWeed1.glb#Scene0")]
+    // #[asset(path = "models/Seaweed.glb#Scene0")]
     // seaweed: Handle<Scene>,
-    #[asset(path = "models/Shells1.glb#Scene0")]
+    #[asset(path = "models/Seaweed1.glb#Scene0")]
     seaweed_1: Handle<Scene>,
 
-    #[asset(path = "models/Shells2.glb#Scene0")]
+    #[asset(path = "models/Seaweed2.glb#Scene0")]
     seaweed_2: Handle<Scene>,
 }
 
@@ -151,11 +150,30 @@ impl SeaweedType {
     /// Gets the corresponding seaweed model for the given seaweed type
     pub fn model_from(&self, collection: &SeaweedCollection) -> Handle<Scene> {
         match self {
-            // SeaweedType::Seaweed => self.seaweed.clone(),
+            // SeaweedType::Seaweed => collection.seaweed.clone(),
             SeaweedType::Seaweed1 => collection.seaweed_1.clone(),
             SeaweedType::Seaweed2 => collection.seaweed_2.clone(),
         }
     }
+
+    pub fn animation_from(&self, collection: &SeaweedAnimationCollection) -> Handle<AnimationClip> {
+        match self {
+            // SeaweedType::Seaweed => collection.seaweed.clone(),
+            SeaweedType::Seaweed1 => collection.seaweed_1.clone(),
+            SeaweedType::Seaweed2 => collection.seaweed_2.clone(),
+        }
+    }
+}
+
+#[derive(AssetCollection, Resource)]
+pub struct SeaweedAnimationCollection {
+    // #[asset(path = "models/Seaweed.glb#Animation0")]
+    // pub seaweed: Handle<AnimationClip>,
+    #[asset(path = "models/Seaweed1.glb#Animation0")]
+    pub seaweed_1: Handle<AnimationClip>,
+
+    #[asset(path = "models/Seaweed2.glb#Animation0")]
+    pub seaweed_2: Handle<AnimationClip>,
 }
 
 #[derive(Debug, Copy, Clone, EnumIter)]
