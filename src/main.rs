@@ -5,19 +5,13 @@ use bevy::{
     math::vec3,
     pbr::CascadeShadowConfigBuilder,
     prelude::*,
-    reflect::TypeUuid,
-    render::{
-        camera::ScalingMode,
-        mesh::Indices,
-        primitives::Plane,
-        render_resource::{AsBindGroup, PrimitiveTopology, Texture},
-    },
+    render::{camera::ScalingMode, mesh::Indices, render_resource::PrimitiveTopology},
     window::PrimaryWindow,
 };
 use bevy_asset_loader::prelude::{LoadingState, LoadingStateAppExt};
 use fishy_assets::{
     CoralCollection, FishAnimationCollection, FishCollection, FishType, RockCollection,
-    SeaweedAnimationCollection, SeaweedCollection, ShellsCollection,
+    SeaweedAnimationCollection, SeaweedCollection, ShellsCollection, TextureCollection,
 };
 use hazard::HazardPlugin;
 use input::{InputPlugin, MovementState, Player, PlayerBundle, PlayerStateEvent};
@@ -52,7 +46,6 @@ fn main() {
         .add_plugin(NoisyShaderPlugin)
         .add_plugin(InputPlugin)
         .add_plugin(HazardPlugin)
-        .add_plugin(MaterialPlugin::<WaterMaterial>::default())
         // A deepwater blue
         .insert_resource(ClearColor(Color::rgb(0.6, 0.8, 9.0)))
         .insert_resource(Bounds::default())
@@ -65,6 +58,7 @@ fn main() {
         .add_collection_to_loading_state::<_, SeaweedCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, SeaweedAnimationCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, RockCollection>(GameState::AssetLoading)
+        .add_collection_to_loading_state::<_, TextureCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, CoralCollection>(GameState::AssetLoading)
         .add_collection_to_loading_state::<_, ShellsCollection>(GameState::AssetLoading)
         .insert_resource(AmbientLight {
@@ -127,29 +121,6 @@ struct FishBundle {
 
     #[bundle]
     scene: SceneBundle,
-}
-
-/// The Material trait is very configurable, but comes with sensible defaults for all methods.
-/// You only need to implement functions for features that need non-default behavior. See the Material api docs for details!
-impl Material for WaterMaterial {
-    // fn fragment_shader() -> ShaderRef {
-    //     "shaders/water_shader.wgsl".into()
-    // }
-}
-
-#[derive(AsBindGroup, TypeUuid, Debug, Clone)]
-#[uuid = "f690fdae-d598-45ab-8225-97e2a3f056e0"]
-pub struct WaterMaterial {
-    #[uniform(0)]
-    time: f32,
-    #[uniform(1)]
-    surface_y: f32,
-    #[uniform(2)]
-    wave_height: f32,
-    #[uniform(3)]
-    wave_length: f32,
-    #[uniform(4)]
-    wave_speed: f32,
 }
 
 const RADIUS: f32 = 100.;
@@ -348,7 +319,7 @@ fn setup_graphics(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
+    texture_collection: Res<TextureCollection>,
 ) {
     // directional 'sun' light
     commands.spawn(DirectionalLightBundle {
@@ -432,24 +403,12 @@ fn setup_graphics(
             .into(),
         ),
         material: materials.add(StandardMaterial {
-            base_color_texture: Some(asset_server.load("textures/background.jpg")),
+            base_color_texture: Some(texture_collection.background.clone()),
             ..default()
         }),
         transform: Transform::from_xyz(0.0, -5.0, -RADIUS),
         ..default()
     });
-
-    // commands.spawn(SpriteBundle {
-    //     sprite: Sprite {
-    //         custom_size: Some(Vec2::new(1920.0, 1080.0)),
-    //         // Alpha channel of the color controls transparency.
-    //         // color: Color::rgba(0.0, 0.0, 1.0, 0.7),
-    //         ..default()
-    //     },
-    //     texture: asset_server.load("textures/background.jpg").clone(),
-    //     transform: Transform::from_xyz(0.0, 0.0, 0.0),
-    //     ..default()
-    // });
 }
 
 #[derive(Component)]
@@ -580,7 +539,7 @@ fn constrain_to_bounds(mut query: Query<&mut Transform, With<Player>>, bounds: R
 }
 
 pub fn play_initial_animations(
-    // I can't use added here for some dumb reason. Some fishes get away without an animation.
+    // I can't use added here for odd dumb reason. Some fishes get away without an animation.
     // That's also the reason we need the silly elapsed time check in the loop.
     initial_animation_query: Query<(Entity, &InitialAnimation), Ref<InitialAnimation>>,
     mut animation_player_query: Query<&mut AnimationPlayer>,

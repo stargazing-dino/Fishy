@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use bevy::asset::AssetServer;
-use bevy::prelude::AnimationClip;
+use bevy::prelude::{AnimationClip, Image};
 use bevy::{
     prelude::{Handle, Resource},
     scene::Scene,
@@ -130,6 +130,7 @@ impl RockType {
 
 #[derive(Debug, Copy, Clone, EnumIter)]
 pub enum SeaweedType {
+    // This seaweed is super janky
     // Seaweed,
     Seaweed1,
     Seaweed2,
@@ -482,4 +483,10 @@ pub struct FishAnimations {
     pub idle: Handle<AnimationClip>,
 
     pub moving: Option<Handle<AnimationClip>>,
+}
+
+#[derive(AssetCollection, Resource)]
+pub struct TextureCollection {
+    #[asset(path = "textures/background.jpg")]
+    pub background: Handle<Image>,
 }

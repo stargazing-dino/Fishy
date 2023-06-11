@@ -57,15 +57,15 @@ impl HazardType {
             HazardType::Squid => Some(FishType::Squid),
             // In the case where a hazard is not a fish, we'll have to deal with that in the
             // future by expanding this and the function defs below.
-            _ => None,
+            // _ => None,
         }
     }
 
-    pub fn model_from(&self, collection: &FishCollection) -> Handle<Scene> {
-        self.into_fish_type()
-            .and_then(|fish_type| Some(fish_type.model_from(collection)))
-            .unwrap()
-    }
+    // pub fn model_from(&self, collection: &FishCollection) -> Handle<Scene> {
+    //     self.into_fish_type()
+    //         .and_then(|fish_type| Some(fish_type.model_from(collection)))
+    //         .unwrap()
+    // }
 
     pub fn animations_from(&self, collection: &FishAnimationCollection) -> FishAnimations {
         self.into_fish_type()
@@ -117,14 +117,9 @@ pub fn spawn_hazard(
     };
     let animations = hazard_type.animations_from(&animation_collection);
     let animation = animations.moving.unwrap_or(animations.idle);
-
     // TODO: This will not always be true once you add different hazards!
     let fish_type = hazard_type.into_fish_type().unwrap();
 
-    // We need to spawn things off camera
-    // Crabs on the ground
-    // Eels spawn near the bottom
-    // Everything else is free game
     let (transform, speed_multiplier) = match hazard_type {
         HazardType::Crab => {
             let bottom = (bounds.max.y - bounds.min.y) / 5.0;
